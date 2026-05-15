@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SyncStream — Room</title>
+
+  <!-- Bootstrap 5 -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" />
+  <!-- Custom styles -->
+  <link rel="stylesheet" href="/style.css" />
+
+  <style>
+    /* Room-specific layout */
+    .room-layout {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      grid-template-rows: auto;
+      gap: 1rem;
+      padding: 1rem 0 2rem;
+    }
+
+    .room-main  { min-width: 0; }
+    .room-aside { display: flex; flex-direction: column; gap: 1rem; }
+
+    .chat-panel { height: 480px; }
+
+    @media (max-width: 900px) {
+      .room-layout {
+        grid-template-columns: 1fr;
+      }
+      .chat-panel { height: 360px; }
+    }
+
+    /* Seek slider */
+    #seekSlider {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 4px;
+      border-radius: 2px;
+      background: var(--border);
+      outline: none;
+      cursor: pointer;
+      accent-color: var(--purple);
+    }
+    #seekSlider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--purple-light);
+      cursor: pointer;
+      box-shadow: 0 0 6px var(--purple-glow);
+    }
+
+    /* Notification strip */
+    #syncNotif {
+      position: fixed;
+      top: 64px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--purple);
+      color: #fff;
+      padding: 0.4rem 1.2rem;
+      border-radius: 999px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      z-index: 999;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    #syncNotif.show { opacity: 1; }
+
+    /* Copy tooltip */
+    #copyTip {
+      font-size: 0.72rem;
+      color: var(--success);
+      margin-left: 0.5rem;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    #copyTip.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+  <!-- ── Navbar ─────────────────────────────────────────────────────── -->
+  <nav class="ss-navbar">
+    <div class="container d-flex align-items-center justify-content-between">
+      <a href="/" class="ss-logo text-decoration-none">
+        <span class="logo-dot"></span>
+        Sync<span>Stream</span>
+      </a>
+      <div id="connectionStatus" class="status-bar">
+        <span id="statusDot" style="width:7px;height:7px;border-radius:50%;background:var(--text-muted);display:inline-block;flex-shrink:0;"></span>
+        <span id="statusText">Connecting…</span>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Sync notification strip -->
+  <div id="syncNotif"></div>
+
+  <div class="container">
+    <div class="room-layout">
+
+      <!-- ── Main column ─────────────────────────────────────────────── -->
+      <div class="room-main d-flex flex-column gap-3">
+
+        <!-- Room header -->
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 pt-2">
+          <div>
+            <p class="section-label mb-1">Sync Room</p>
+            <div class="d-flex align-items-center gap-2">
+              <span id="roomCodeDisplay" class="room-code-badge" title="Click to copy" onclick="copyCode()">----</span>
+              <span id="copyTip">Copied!</span>
+            </div>
+            <p style="font-size:0.78rem; color:var(--text-muted); margin-top:0.35rem;">
+              Share this code with friends to invite them.
+            </p>
+          </div>
+          <a href="/" class="btn-outline-purple" style="font-size:0.85rem; padding:0.45rem 1rem;">
+            ← Leave Room
+          </a>
+        </div>
+
+        <!-- Video player -->
+        <div class="video-wrapper">
+          <video
+            id="syncVideo"
+            preload="metadata"
+            src="https://www.w3schools.com/html/mov_bbb.mp4"
+          ></video>
+          <div class="video-overlay-msg" id="videoOverlay">
+            Use the controls below to sync playback with your room.
+            On your real setup, open the same title on your streaming service.
+          </div>
+        </div>
+
+        <!-- Seek slider -->
+        <div>
+          <input type="range" id="seekSlider" min="0" max="100" value="0" step="0.1" />
+          <div class="d-flex justify-content-between" style="font-size:0.75rem; color:var(--text-muted); margin-top:0.2rem;">
+            <span id="currentTime">0:00</span>
+            <span id="duration">--:--</span>
+          </div>
+        </div>
+
+        <!-- Sync controls -->
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-3">
+          <div class="sync-controls">
+            <!-- Play -->
+            <button class="ctrl-btn" id="btnPlay" onclick="syncPlay()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8 5v14l11-7z"/>
+              </svg>
+              Play All
+            </button>
+
+            <!-- Pause -->
+            <button class="ctrl-btn" id="btnPause" onclick="syncPause()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+              </svg>
+              Pause All
+            </button>
+
+            <!-- Seek to current -->
+            <button class="ctrl-btn" onclick="syncSeek()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M18 13l-5.5-5.5-1.4 1.4L15.17 13 11.1 17.1l1.4 1.4L18 13zm-7 0L5.5 7.5 4.1 8.9 8.17 13 4.1 17.1l1.4 1.4L11 13z"/>
+              </svg>
+              Sync Position
+            </button>
+          </div>
+
+          <div style="font-size:0.8rem; color:var(--text-muted);">
+            All controls broadcast to everyone in the room.
+          </div>
+        </div>
+
+        <!-- Connected users -->
+        <div class="ss-card" style="padding:1rem 1.25rem;">
+          <p class="section-label mb-2">In This Room</p>
+          <div id="usersList" class="d-flex flex-wrap gap-2">
+            <!-- Pills injected by JS -->
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ── Sidebar (chat) ──────────────────────────────────────────── -->
+      <div class="room-aside">
+        <div class="chat-panel">
+          <div class="chat-header">💬 Room Chat</div>
+          <div class="chat-messages" id="chatMessages">
+            <div class="chat-msg system">
+              <span class="body">Waiting for others to join…</span>
+            </div>
+          </div>
+          <div class="chat-input-row">
+            <input
+              id="chatInput"
+              class="ss-input"
+              type="text"
+              placeholder="Say something…"
+              maxlength="200"
+              onkeydown="if(event.key==='Enter') sendChat()"
+            />
+            <button class="btn-purple" onclick="sendChat()" style="padding:0.5rem 0.9rem;">
+              ↑
+            </button>
+          </div>
+        </div>
+
+        <!-- Quick tips card -->
+        <div class="ss-card" style="padding:1rem 1.25rem;">
+          <p class="section-label mb-2">Quick Tips</p>
+          <ul style="list-style:none; padding:0; display:flex; flex-direction:column; gap:0.5rem; font-size:0.82rem; color:var(--text-secondary);">
+            <li>▸ Hit <strong style="color:var(--text-primary);">Play All</strong> to start everyone simultaneously.</li>
+            <li>▸ <strong style="color:var(--text-primary);">Pause All</strong> buffers time for a break.</li>
+            <li>▸ <strong style="color:var(--text-primary);">Sync Position</strong> snaps latecomers to your timestamp.</li>
+            <li>▸ Click the room code to copy it.</li>
+          </ul>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Bootstrap JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <!-- Socket.io client (served by our server) -->
+  <script src="/socket.io/socket.io.js"></script>
+
+  <script>
+    // ── Parse URL params ───────────────────────────────────────────────
+    const params   = new URLSearchParams(window.location.search);
+    const roomCode = (params.get('code') || '').toUpperCase();
+    const username = params.get('user') || 'Anonymous';
+
+    if (!roomCode) {
+      alert('No room code provided. Redirecting to home.');
+      window.location.href = '/';
+    }
+
+    // ── DOM refs ───────────────────────────────────────────────────────
+    const video          = document.getElementById('syncVideo');
+    const seekSlider     = document.getElementById('seekSlider');
+    const currentTimeEl  = document.getElementById('currentTime');
+    const durationEl     = document.getElementById('duration');
+    const roomCodeEl     = document.getElementById('roomCodeDisplay');
+    const usersListEl    = document.getElementById('usersList');
+    const chatMessagesEl = document.getElementById('chatMessages');
+    const chatInput      = document.getElementById('chatInput');
+    const statusDot      = document.getElementById('statusDot');
+    const statusText     = document.getElementById('statusText');
+    const syncNotif      = document.getElementById('syncNotif');
+    const videoOverlay   = document.getElementById('videoOverlay');
+
+    roomCodeEl.textContent = roomCode;
+
+    // ── State ──────────────────────────────────────────────────────────
+    let connectedUsers  = []; // array of usernames
+    let suppressLocal   = false; // prevent re-broadcasting events we received
+
+    // ── Helpers ────────────────────────────────────────────────────────
+    function fmtTime(secs) {
+      if (!isFinite(secs)) return '--:--';
+      const m = Math.floor(secs / 60);
+      const s = Math.floor(secs % 60);
+      return `${m}:${s.toString().padStart(2, '0')}`;
+    }
+
+    function showNotif(msg) {
+      syncNotif.textContent = msg;
+      syncNotif.classList.add('show');
+      clearTimeout(syncNotif._timer);
+      syncNotif._timer = setTimeout(() => syncNotif.classList.remove('show'), 2800);
+    }
+
+    function setConnectionStatus(connected) {
+      if (connected) {
+        statusDot.style.background = 'var(--success)';
+        statusText.textContent = `Connected as ${username}`;
+        document.getElementById('connectionStatus').classList.remove('disconnected');
+      } else {
+        statusDot.style.background = 'var(--danger)';
+        statusText.textContent = 'Disconnected';
+        document.getElementById('connectionStatus').classList.add('disconnected');
+      }
+    }
+
+    function renderUsers(users) {
+      usersListEl.innerHTML = '';
+      (users || connectedUsers).forEach(name => {
+        const pill = document.createElement('div');
+        pill.className = 'user-pill' + (name === username ? ' is-me' : '');
+        pill.innerHTML = `<span class="user-dot"></span>${escHtml(name)}${name === username ? ' (you)' : ''}`;
+        usersListEl.appendChild(pill);
+      });
+    }
+
+    function addChatMsg(from, message, isSystem = false, isMe = false) {
+      const msg = document.createElement('div');
+      msg.className = 'chat-msg' + (isSystem ? ' system' : '');
+      if (isSystem) {
+        msg.innerHTML = `<span class="body">${escHtml(message)}</span>`;
+      } else {
+        msg.innerHTML = `
+          <span class="sender ${isMe ? 'is-me' : ''}">${escHtml(from)}</span>
+          <span class="body">${escHtml(message)}</span>
+        `;
+      }
+      chatMessagesEl.appendChild(msg);
+      chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+    }
+
+    function escHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function copyCode() {
+      navigator.clipboard.writeText(roomCode).then(() => {
+        const tip = document.getElementById('copyTip');
+        tip.classList.add('show');
+        setTimeout(() => tip.classList.remove('show'), 1800);
+      });
+    }
+
+    // ── Socket.io ──────────────────────────────────────────────────────
+    const socket = io();
+
+    socket.on('connect', () => {
+      setConnectionStatus(true);
+      socket.emit('join-room', { roomCode, username });
+    });
+
+    socket.on('disconnect', () => {
+      setConnectionStatus(false);
+      addChatMsg('', 'You disconnected from the room.', true);
+    });
+
+    socket.on('error', ({ message }) => {
+      addChatMsg('', `Error: ${message}`, true);
+    });
+
+    // Server confirms we joined
+    socket.on('room-joined', (room) => {
+      connectedUsers = room.users.map(u => u.username);
+      renderUsers(connectedUsers);
+      addChatMsg('', `You joined room ${room.roomCode}. ${room.userCount} user(s) connected.`, true);
+    });
+
+    // Someone else joined
+    socket.on('user-joined', ({ username: who, users }) => {
+      connectedUsers = users;
+      renderUsers(connectedUsers);
+      addChatMsg('', `${who} joined the room.`, true);
+      showNotif(`${who} joined`);
+    });
+
+    // Someone left
+    socket.on('user-left', ({ username: who, users }) => {
+      connectedUsers = users;
+      renderUsers(connectedUsers);
+      addChatMsg('', `${who} left the room.`, true);
+      showNotif(`${who} left`);
+    });
+
+    // ── Incoming sync events ───────────────────────────────────────────
+
+    socket.on('play', ({ timestamp, from }) => {
+      suppressLocal = true;
+      video.currentTime = timestamp;
+      video.play().catch(() => {});
+      suppressLocal = false;
+      showNotif(`▶ ${from} pressed Play`);
+      addChatMsg('', `▶ ${from} pressed Play at ${fmtTime(timestamp)}`, true);
+    });
+
+    socket.on('pause', ({ timestamp, from }) => {
+      suppressLocal = true;
+      video.currentTime = timestamp;
+      video.pause();
+      suppressLocal = false;
+      showNotif(`⏸ ${from} paused`);
+      addChatMsg('', `⏸ ${from} paused at ${fmtTime(timestamp)}`, true);
+    });
+
+    socket.on('seek', ({ timestamp, from }) => {
+      suppressLocal = true;
+      video.currentTime = timestamp;
+      suppressLocal = false;
+      showNotif(`⏩ ${from} skipped to ${fmtTime(timestamp)}`);
+      addChatMsg('', `⏩ ${from} skipped to ${fmtTime(timestamp)}`, true);
+    });
+
+    socket.on('chat', ({ from, message }) => {
+      const isMe = from === username;
+      addChatMsg(from, message, false, isMe);
+    });
+
+    // ── Outbound sync actions ──────────────────────────────────────────
+
+    function syncPlay() {
+      const ts = video.currentTime;
+      video.play().catch(() => {});
+      socket.emit('play', { timestamp: ts });
+    }
+
+    function syncPause() {
+      const ts = video.currentTime;
+      video.pause();
+      socket.emit('pause', { timestamp: ts });
+    }
+
+    function syncSeek() {
+      const ts = video.currentTime;
+      socket.emit('seek', { timestamp: ts });
+      showNotif(`Synced everyone to ${fmtTime(ts)}`);
+    }
+
+    function sendChat() {
+      const msg = chatInput.value.trim();
+      if (!msg) return;
+      socket.emit('chat', { message: msg });
+      chatInput.value = '';
+    }
+
+    // ── Local video event listeners ────────────────────────────────────
+    // These fire from native video element interactions (clicking the
+    // native controls). We only forward them if NOT suppressed (i.e., not
+    // already caused by an incoming remote event).
+
+    video.addEventListener('play', () => {
+      if (suppressLocal) return;
+      socket.emit('play', { timestamp: video.currentTime });
+    });
+
+    video.addEventListener('pause', () => {
+      if (suppressLocal) return;
+      socket.emit('pause', { timestamp: video.currentTime });
+    });
+
+    // Seek: fired after the user drags the native scrubber and releases
+    video.addEventListener('seeked', () => {
+      if (suppressLocal) return;
+      socket.emit('seek', { timestamp: video.currentTime });
+    });
+
+    // ── Seek slider ────────────────────────────────────────────────────
+    video.addEventListener('loadedmetadata', () => {
+      seekSlider.max = video.duration;
+      durationEl.textContent = fmtTime(video.duration);
+      videoOverlay.style.opacity = '0';
+    });
+
+    video.addEventListener('timeupdate', () => {
+      if (!suppressLocal) {
+        seekSlider.value = video.currentTime;
+      }
+      currentTimeEl.textContent = fmtTime(video.currentTime);
+    });
+
+    seekSlider.addEventListener('input', () => {
+      video.currentTime = parseFloat(seekSlider.value);
+    });
+
+    seekSlider.addEventListener('change', () => {
+      // Broadcast the seek after user releases
+      if (!suppressLocal) {
+        socket.emit('seek', { timestamp: video.currentTime });
+      }
+    });
+
+    // ── Initial render ─────────────────────────────────────────────────
+    renderUsers([username]);
+    document.title = `SyncStream — Room ${roomCode}`;
+  </script>
+</body>
+</html>

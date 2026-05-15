@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -6,14 +7,27 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: '*',
-    methods: ['GET', 'POST']
-  }
-});
 
 const PORT = process.env.PORT || 3000;
+const NODE_ENV = process.env.NODE_ENV || 'development';
+
+// CORS: open in dev, locked to ALLOWED_ORIGINS in production
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+  : ['http://localhost:3000', 'http://127.0.0.1:3000'];
+
+const io = new Server(server, {
+  cors: {
+    origin: NODE_ENV === 'production' ? allowedOrigins : '*',
+    methods: ['GET', 'POST'],
+    credentials: true
+  },
+  // Needed for some proxy/hosting setups
+  transports: ['websocket', 'polling']
+});
+
+// Trust proxy headers (required for Railway, Render, Heroku)
+app.set('trust proxy', 1);
 
 // ─── In-memory store ────────────────────────────────────────────────────────
 // rooms: Map<roomCode, { roomId, roomCode, createdAt, users: Map<socketId, { username, socketId }> }>
